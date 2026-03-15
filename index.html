@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A88 Payment Groups</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <h1>A88 Payment Groups</h1>
+    </div>
+    <div class="header-right">
+      <div class="user-info" id="user-info">User : —</div>
+      <button class="hamburger" id="menu-btn" aria-label="เปิดเมนู">☰</button>
+    </div>
+  </header>
+
+  <!-- Overlay -->
+  <div id="menu-overlay" class="menu-overlay"></div>
+
+  <!-- Side Panel -->
+  <div id="admin-panel" class="side-panel">
+    <div class="panel-header">
+      <h2>เมนู</h2>
+      <button id="menu-close" aria-label="ปิดเมนู">×</button>
+    </div>
+    <div class="panel-content">
+      <div class="menu-section">
+        <div class="menu-section-title">บัญชีของฉัน</div>
+        <div class="current-user">
+          <strong id="my-username-display">กำลังโหลด...</strong>
+        </div>
+      </div>
+      <div class="menu-section">
+        <div class="menu-section-title">ความปลอดภัย</div>
+        <a href="#" id="change-password-link" class="menu-link">เปลี่ยนรหัสผ่าน</a>
+      </div>
+      <div id="admin-only-section" class="menu-section" style="display:none;">
+        <div class="menu-section-title">สำหรับ Admin</div>
+        <a href="https://docs.google.com/spreadsheets/d/15_9avaeHupv6QDRBXM_jyXybvX450BFZ04e5rF_Amak/edit?gid=0" target="_blank" class="menu-link">
+          จัดการ Setting FI
+        </a>
+      </div>
+      <div class="menu-section">
+        <div class="menu-section-title">การกระทำ</div>
+        <a href="#" id="logout-link" class="menu-link logout">ออกจากระบบ</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal เปลี่ยนรหัสผ่าน -->
+  <div id="change-password-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span id="close-password-modal" class="modal-close">×</span>
+      <h3>เปลี่ยนรหัสผ่าน</h3>
+      <div class="form-group">
+        <label for="old-password">รหัสผ่านเก่า</label>
+        <input type="password" id="old-password" placeholder="••••••••" required>
+      </div>
+      <div class="form-group">
+        <label for="new-password">รหัสผ่านใหม่</label>
+        <input type="password" id="new-password" placeholder="••••••••" required>
+      </div>
+      <div class="form-group">
+        <label for="confirm-password">ยืนยันรหัสผ่านใหม่</label>
+        <input type="password" id="confirm-password" placeholder="••••••••" required>
+      </div>
+      <p id="password-error" class="error-message"></p>
+      <button id="submit-password-change">ยืนยันการเปลี่ยน</button>
+    </div>
+  </div>
+
+  <main id="groups-container">
+
+    <!-- หัวข้อตาราง -->
+    <div class="table-header">
+      <div class="group-name header">PM Group</div>
+      <div class="accounts-list header">Bank Account</div>
+    </div>
+    <div class="loading" id="loading-indicator">กำลังโหลดข้อมูล...</div>
+
+    <!-- รายการกลุ่มจะถูก render ที่นี่ -->
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

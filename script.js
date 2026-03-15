@@ -29,6 +29,20 @@ const bankPriority = {
   BAY: 6
 };
 
+const bankThaiNames = {
+  SCB: "ไทยพาณิชย์",
+  KBANK: "กสิกรไทย",
+  BBL: "กรุงเทพ",
+  KTB: "กรุงไทย",
+  TMB: "ทหารไทยธนชาต (TMBThanachart)",
+  BAY: "กรุงศรีอยุธยา",
+  GSB: "ออมสิน",
+  // เพิ่มธนาคารอื่น ๆ ถ้ามีในข้อมูล เช่น
+  // UOB: "ยูโอบี",
+  // CIMB: "ซีไอเอ็มบี ไทย",
+  default: "ไม่ระบุ"
+};
+
 const paymentGroups = [
   { name: "A884", key: "A884" },
   { name: "A883,WC22", key: "A883,WC22" },
@@ -141,24 +155,26 @@ function renderGroups(accounts) {
     const accountsContainer = document.createElement("div");
     accountsContainer.className = "accounts-list";
 
-    matches.forEach(acc => {
-      const item = document.createElement("button");
-      item.className = "account-item";
-      item.type = "button";
+matches.forEach(acc => {
+  const item = document.createElement("button");
+  item.className = "account-item";
+  item.type = "button";
 
-      const displayText = acc.short;
+  const displayText = acc.short;  // หรือจะปรับแสดงชื่อไทยที่นี่ด้วยก็ได้ แต่ส่วนใหญ่คนชอบเห็นตัวย่อบนหน้าเว็บ
 
-      item.innerHTML = `<span class="acc-text">${displayText}</span>`;
+  item.innerHTML = `<span class="acc-text">${displayText}</span>`;
 
-      item.onclick = () => {
-        const text = `📌 ช่องทางโอนเงิน
-ธนาคาร : ${acc.bank}
+  item.onclick = () => {
+    const bankThai = bankThaiNames[acc.bank] || bankThaiNames.default || acc.bank;
+
+    const text = `📌 ช่องทางโอนเงิน
+ธนาคาร : ${bankThai}
 ชื่อบัญชี : ${acc.name}
 เลขบัญชี : ${formatAccountNumber(acc.no)}
 
 ━━━━━━━━━━━━━━━━
 
-⚠ สำคัญ
+⚠️ สำคัญ
 • กรุณาตรวจสอบชื่อบัญชีก่อนโอน
 • โอนจากบัญชีชื่อเดียวกับที่สมัครเท่านั้น
 • ฝากขั้นต่ำ 50 บาท
@@ -166,16 +182,16 @@ function renderGroups(accounts) {
 
 หากโอนแล้ว กรุณาส่งสลิปเพื่อทำรายการค่ะ 🙏`;
 
-        navigator.clipboard.writeText(text).then(() => {
-          showToast("คัดลอกแล้ว ✓");
-        });
-
-        item.classList.add("copied");
-        setTimeout(() => item.classList.remove("copied"), 1400);
-      };
-
-      accountsContainer.appendChild(item);
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("คัดลอกแล้ว ✓");
     });
+
+    item.classList.add("copied");
+    setTimeout(() => item.classList.remove("copied"), 1400);
+  };
+
+  accountsContainer.appendChild(item);
+});
 
     row.appendChild(accountsContainer);
     container.appendChild(row);

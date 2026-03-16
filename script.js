@@ -26,7 +26,8 @@ const bankPriority = {
   KBANK: 3,
   BBL: 4,
   TMB: 5,
-  BAY: 6
+  BAY: 6,
+  ISBT: 7
 };
 
 const bankThaiNames = {
@@ -37,9 +38,10 @@ const bankThaiNames = {
   TMB: "ทหารไทยธนชาต (TMBThanachart)",
   BAY: "กรุงศรีอยุธยา",
   GSB: "ออมสิน",
-  // เพิ่มธนาคารอื่น ๆ ถ้ามีในข้อมูล เช่น
   UOB: "ยูโอบี",
   CIMB: "ซีไอเอ็มบี ไทย",
+  ISBT: "อิสลามแห่งประเทศไทย",
+  // เพิ่มธนาคารอื่น ๆ ถ้ามีในข้อมูล เช่น
   default: "ไม่ระบุ"
 };
 
@@ -57,7 +59,7 @@ const paymentGroups = [
 function formatAccountNumber(no) {
   const s = (no || '').toString();
   if (s.length === 10) {
-    return `${s.slice(0,3)}-${s.slice(3,4)}-${s.slice(4)}`;
+    return `${s.slice(0, 3)}-${s.slice(3, 4)}-${s.slice(4)}`;
   }
   return s;
 }
@@ -155,19 +157,19 @@ function renderGroups(accounts) {
     const accountsContainer = document.createElement("div");
     accountsContainer.className = "accounts-list";
 
-matches.forEach(acc => {
-  const item = document.createElement("button");
-  item.className = "account-item";
-  item.type = "button";
+    matches.forEach(acc => {
+      const item = document.createElement("button");
+      item.className = "account-item";
+      item.type = "button";
 
-  const displayText = acc.short;  // หรือจะปรับแสดงชื่อไทยที่นี่ด้วยก็ได้ แต่ส่วนใหญ่คนชอบเห็นตัวย่อบนหน้าเว็บ
+      const displayText = acc.short;  // หรือจะปรับแสดงชื่อไทยที่นี่ด้วยก็ได้ แต่ส่วนใหญ่คนชอบเห็นตัวย่อบนหน้าเว็บ
 
-  item.innerHTML = `<span class="acc-text">${displayText}</span>`;
+      item.innerHTML = `<span class="acc-text">${displayText}</span>`;
 
-  item.onclick = () => {
-    const bankThai = bankThaiNames[acc.bank] || bankThaiNames.default || acc.bank;
+      item.onclick = () => {
+        const bankThai = bankThaiNames[acc.bank] || bankThaiNames.default || acc.bank;
 
-    const text = `📌 ช่องทางโอนเงิน
+        const text = `📌 ช่องทางโอนเงิน
 ธนาคาร : ${bankThai}
 ชื่อบัญชี : ${acc.name}
 เลขบัญชี : ${formatAccountNumber(acc.no)}
@@ -182,16 +184,16 @@ matches.forEach(acc => {
 
 หากโอนแล้ว กรุณาส่งสลิปเพื่อทำรายการค่ะ 🙏`;
 
-    navigator.clipboard.writeText(text).then(() => {
-      showToast("คัดลอกแล้ว ✓");
+        navigator.clipboard.writeText(text).then(() => {
+          showToast("คัดลอกแล้ว ✓");
+        });
+
+        item.classList.add("copied");
+        setTimeout(() => item.classList.remove("copied"), 1400);
+      };
+
+      accountsContainer.appendChild(item);
     });
-
-    item.classList.add("copied");
-    setTimeout(() => item.classList.remove("copied"), 1400);
-  };
-
-  accountsContainer.appendChild(item);
-});
 
     row.appendChild(accountsContainer);
     container.appendChild(row);

@@ -27,7 +27,7 @@
             <h1 class="text-5xl font-bold bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent inline-block">
                 ISBT CSV Converter
             </h1>
-            <p class="text-zinc-400 mt-3 text-lg">อัพโหลด Excel หรือวางข้อความ → สร้างไฟล์ CSV (กรองข้อมูลซ้ำอัตโนมัติ)</p>
+            <p class="text-zinc-400 mt-3 text-lg">รองรับเลขบัญชี 10–12 หลัก | กรองข้อมูลซ้ำอัตโนมัติ</p>
         </header>
 
         <!-- Last Balance + Upload -->
@@ -86,7 +86,7 @@
                 </div>
             </div>
 
-            <!-- รายการที่ถูกกรองออก (ซ่อนไว้ก่อน แสดงเฉพาะตอนมีข้อมูลซ้ำ) -->
+            <!-- รายการที่ถูกกรองออก (แสดงเฉพาะตอนมีซ้ำ) -->
             <div id="filteredSection" class="filtered-section mb-10 bg-zinc-900/70 rounded-2xl p-6 border border-zinc-700">
                 <h3 class="text-lg font-semibold mb-4 text-rose-400">รายการที่ถูกกรองออก (ซ้ำ)</h3>
                 <div id="filteredList" class="text-sm text-zinc-300 max-h-48 overflow-y-auto font-mono whitespace-pre-wrap">
@@ -118,7 +118,7 @@
 <script>
 // Global variables
 let processedRows = [];
-let filteredOutRows = []; // เก็บเฉพาะรายการซ้ำ (ไม่รวมที่ไม่ผ่านเงื่อนไขอื่น)
+let filteredOutRows = [];
 let totalNewCredit = 0;
 let currentDateStr = '';
 
@@ -269,7 +269,7 @@ function processPastedText() {
         const bank = parts[idx++] || '';
 
         let nameParts = [];
-        while (idx < parts.length && !/^\d{10}$/.test(parts[idx])) {
+        while (idx < parts.length && !/^\d{10,12}$/.test(parts[idx])) {
             nameParts.push(parts[idx++]);
         }
         const accountName = nameParts.join(' ').trim();

@@ -46,6 +46,7 @@ const bankThaiNames = {
   UOB: "ยูโอบี",
   CIMB: "ซีไอเอ็มบี ไทย",
   ISBT: "อิสลามแห่งประเทศไทย",
+  TTB: "ทหารไทยธนชาต",
   // เพิ่มธนาคารอื่น ๆ ถ้ามีในข้อมูล เช่น
   default: "ไม่ระบุ"
 };
@@ -85,36 +86,36 @@ function loadData() {
     const s = document.createElement("script");
     const url = `${APPS_SCRIPT_URL}?secret=${SECRET_KEY}&callback=${cb}`;
     s.src = url;
-    
+
     const timeout = setTimeout(() => {
       delete window[cb];
       s.remove();
       reject(new Error('Request timeout'));
     }, 10000);
-    
+
     window[cb] = (res) => {
       clearTimeout(timeout);
       delete window[cb];
       s.remove();
-      
+
       if (!res?.data) {
         reject(new Error('No data'));
         return;
       }
-      
+
       const accounts = res.data.map(a => ({
         ...a,
         short: (a.short || '').trim() || `${a.bank}-${a.no.toString().slice(-5)}`
       }));
       resolve(accounts);
     };
-    
+
     s.onerror = (error) => {
       clearTimeout(timeout);
       delete window[cb];
       reject(error);
     };
-    
+
     document.body.appendChild(s);
   });
 }
@@ -123,7 +124,7 @@ function checkUpdate() {
   const url = `${APPS_SCRIPT_URL}?secret=${SECRET_KEY}&mode=check`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
-  
+
   fetch(url, { signal: controller.signal })
     .then(r => {
       clearTimeout(timeoutId);
@@ -133,7 +134,7 @@ function checkUpdate() {
     .then(data => {
       if (data.updated !== lastUpdate) {
         lastUpdate = data.updated;
-        
+
         loadData()
           .then(accounts => {
             const json = JSON.stringify(accounts);

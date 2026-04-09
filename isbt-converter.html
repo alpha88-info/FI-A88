@@ -131,6 +131,11 @@ function processPastedText() {
     const text = pasteTextEl.value.trim();
     if (!text) return statusEl.innerHTML = `<div class="text-red-400 text-xl">กรุณาวางข้อความก่อน</div>`;
 
+    // รีเซ็ต flags ตั้นต้นของการประมวลผล
+    accountNumber = 'UNKNOWN';
+    isTTB = false;
+    isKTB = false;
+
     btnProcess.disabled = true;
     btnProcess.textContent = 'กำลังประมวลผล...';
 
@@ -157,11 +162,15 @@ function processPastedText() {
         }
 
         // ตรวจหาว่า KTB หรือ ISBT/TTB จากรูปแบบข้อมูล
-        if (!isKTB && !isTTB && lines.length > 0) {
+        // สำคัญ: ตรวจสอบ ISBT/TTB prefix ก่อน ไม่ให้ KTB logic มาแทน
+        if (!isKTB && !isTTB && !accountNumber.startsWith('ISBT') && lines.length > 0) {
             if (/mBanking|cBanking/.test(lines[0]) && /KTB|KBANK|BBL|SCB|BAY|TMB|UOB|CIMB|GSB/.test(lines[0])) {
-                isKTB = true;
-                accountNumber = 'KTB-00000';
-                console.log('ตรวจพบรูปแบบ KTB/KBANK');
+                // ตรวจสอบว่าไม่มี ISBT/TTB pattern
+                if (!/ISBT|TTB/.test(lines[0])) {
+                    isKTB = true;
+                    accountNumber = 'KTB-00000';
+                    console.log('ตรวจพบรูปแบบ KTB/KBANK');
+                }
             }
         }
 
@@ -220,15 +229,15 @@ function parseKTBFormat(lines, allRows, seen, duplicateCount, totalNewCreditTemp
         
         // Account Name (can be multiple words until we find phone or date)
         let nameParts = [];
-        while (idx < parts.length && !/^\d{8,10}$/.test(parts[idx]) && !/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
+        while (idx < parts.length && !/^\d{8,}$/.test(parts[idx]) && !/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
             nameParts.push(parts[idx++]);
         }
         
         const accountName = nameParts.join(' ').trim();
         
-        // Phone Number (optional)
+        // Phone Number (optional) - รับหมายเลข 8 หลักขึ้นไป
         let phoneNumber = '';
-        if (idx < parts.length && /^\d{8,10}$/.test(parts[idx])) {
+        if (idx < parts.length && /^\d{8,}$/.test(parts[idx])) {
             phoneNumber = parts[idx++];
         }
         
@@ -478,7 +487,7 @@ function downloadCSV() {
         rowsToExport.forEach(r => {
             runningBalance += r.amount;
             const ktbDate = formatDateForKTB(r.transferDate);
-            const description = `From account no.: ${r.bank}${r.accountNo.substring(Math.max(0, r.accountNo.length - 4))} From account name: ${r.accountName}`.trim();
+            const description = `From account no.: ${r.accountNo} From account name: ${r.accountName}`.trim();
             csvContent += `${no++},${ktbDate},,${csvEscape(description)},,${r.amount.toFixed(2)},,,\r\n`;
         });
     } else if (isTTB) {

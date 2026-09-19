@@ -74,7 +74,9 @@ header {
   height: 100%;
   background: white;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
-  transition: right 0.3s ease-out;
+  /* visibility หน่วงไว้จนสไลด์ปิดเสร็จ — ตอนปิดแล้วกด Tab เข้าเมนูไม่ได้ */
+  transition: right 0.3s ease-out, visibility 0s linear 0.3s;
+  visibility: hidden;
   z-index: 1100;
   display: flex;
   flex-direction: column;
@@ -82,6 +84,29 @@ header {
 
 .side-panel.open {
   right: 0;
+  visibility: visible;
+  transition: right 0.3s ease-out, visibility 0s;
+}
+
+/* ฉากมืดหลังเมนู — คลิกเพื่อปิดเมนู (JS ผูก click ไว้แล้วที่ #menu-overlay)
+   z-index: header 900 < overlay 1000 < side-panel 1100 < modal 1200 */
+.menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+}
+
+.menu-overlay.open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s ease, visibility 0s;
 }
 
 /* Header ของ panel */

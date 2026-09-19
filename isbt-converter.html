@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ISBT / TTB / KTB CSV Converter</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body { font-family: 'Inter', system-ui, sans-serif; scroll-behavior: smooth; background: linear-gradient(to bottom right, #0f172a, #1e293b); }
+        body.auth-pending { visibility: hidden; }
         .preview-table { max-height: 70vh; min-height: 200px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-gutter: stable; background: #111827; border-radius: 1rem; border: 1px solid #374151; }
         .preview-table::-webkit-scrollbar { width: 8px; }
         .preview-table::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
@@ -19,9 +19,14 @@
         input[type="checkbox"] { accent-color: #8b5cf6; }
         tr.selected { background: rgba(139, 92, 246, 0.2) !important; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .pagination { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+        .pagination button { padding: 6px 12px; background: #27272a; border: 1px solid #3f3f46; border-radius: 8px; font-size: 0.85rem; }
+        .pagination button:hover:not(:disabled) { background: #3f3f46; }
+        .pagination button.active { background: #7c3aed; border-color: #7c3aed; }
+        .tag-seen { display: inline-block; margin-left: 8px; padding: 1px 8px; font-size: 0.7rem; border-radius: 9999px; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     </style>
 </head>
-<body class="text-white min-h-screen">
+<body class="text-white min-h-screen auth-pending">
     <div class="max-w-6xl mx-auto px-6 py-10">
         <header class="text-center mb-12">
             <h1 class="text-5xl font-bold bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent inline-block">
@@ -30,7 +35,7 @@
             <p class="text-zinc-400 mt-3 text-lg">รองรับ ISBT, TTB และ KTB (รูปแบบไฟล์ต่างกัน)</p>
         </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-6">
             <div class="bg-zinc-800/80 backdrop-blur-sm rounded-3xl p-8 border border-zinc-700 shadow-xl">
                 <label class="block text-lg font-semibold mb-4 text-violet-300">ยอดคงเหลือล่าสุด</label>
                 <input type="number" id="lastBalance" placeholder="เช่น 138237.98" step="0.01"
@@ -51,7 +56,14 @@
             </div>
         </div>
 
-        <div id="status" class="text-center min-h-[64px] mb-10"></div>
+        <div class="text-right mb-6">
+            <button id="btnClearHistory" class="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-4">
+                ล้างประวัติรายการที่เคยดาวน์โหลด (<span id="historyCount">0</span>)
+            </button>
+        </div>
+
+        <div id="status" class="text-center min-h-[64px] mb-6"></div>
+        <div id="reportPanel" class="mb-10"></div>
 
         <div id="resultPanel" class="hidden bg-zinc-800/90 backdrop-blur-md rounded-3xl shadow-2xl p-10 border border-zinc-700">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
@@ -87,38 +99,164 @@
         </div>
     </div>
 
+<script src="config.js?v=20260919-1"></script>
 <script>
-// Global variables
+// ─────────────────────────────────────────────────────────────
+// Auth guard — ต้องล็อกอินก่อนถึงจะเห็นหน้านี้ (ใช้ token เดียวกับหน้าหลัก)
+// หมายเหตุ: หน้านี้ประมวลผลในเครื่องล้วน ๆ ไม่ดึงข้อมูลจาก server
+// guard นี้จึงเป็นการจำกัดผู้เข้าใช้ ไม่ใช่การปกป้องข้อมูลบน server
+// ─────────────────────────────────────────────────────────────
+(async function authGuard() {
+    let token = null;
+    try { token = localStorage.getItem('token'); } catch (e) { /* ignore */ }
+    if (!token) { location.replace('login.html'); return; }
+
+    try {
+        const res = await apiCall('verify', { token });
+        if (res && res.success && res.valid) {
+            document.body.classList.remove('auth-pending');
+            return;
+        }
+        try { localStorage.removeItem('token'); } catch (e) { /* ignore */ }
+        location.replace('login.html?reason=' + encodeURIComponent((res && res.message) || 'เซสชันหมดอายุ'));
+    } catch (err) {
+        // ตรวจสิทธิ์ไม่ได้ (เช่น เครือข่ายล่ม / config ผิด) — แสดงข้อความชัดเจน ไม่ปล่อยหน้าเปล่า
+        document.body.classList.remove('auth-pending');
+        const box = document.createElement('div');
+        box.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#0f172a;color:#fca5a5;font-size:1.1rem;text-align:center;padding:32px';
+        const msg = document.createElement('div');
+        msg.textContent = 'ตรวจสอบสิทธิ์ไม่สำเร็จ: ' + (err && err.message ? err.message : 'ไม่ทราบสาเหตุ');
+        const btn = document.createElement('button');
+        btn.textContent = 'ลองใหม่';
+        btn.style.cssText = 'padding:8px 24px;border-radius:8px;background:#7c3aed;color:#fff';
+        btn.onclick = () => location.reload();
+        box.append(msg, btn);
+        document.body.appendChild(box);
+    }
+})();
+</script>
+<script>
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
 let allRows = [];
 let currentPage = 1;
 const rowsPerPage = 100;
-let currentDateStr = '';
 let accountNumber = 'UNKNOWN';
-let isTTB = false;   // ใช้เช็คว่าเป็น TTB หรือไม่
-let isKTB = false;   // ใช้เช็คว่าเป็น KTB หรือไม่
+let isTTB = false;
+let isKTB = false;
 
-const pasteTextEl = document.getElementById('pasteText');
-const lastBalanceEl = document.getElementById('lastBalance');
-const statusEl = document.getElementById('status');
-const resultPanel = document.getElementById('resultPanel');
-const countEl = document.getElementById('count');
-const newCreditEl = document.getElementById('newCredit');
-const newBalanceEl = document.getElementById('newBalance');
-const previewEl = document.getElementById('preview');
-const paginationEl = document.getElementById('pagination');
-const btnProcess = document.getElementById('btnProcess');
-const btnClear = document.getElementById('btnClear');
-const btnSelectAll = document.getElementById('btnSelectAll');
-const btnUnselectAll = document.getElementById('btnUnselectAll');
-const btnDownload = document.getElementById('btnDownload');
+const HISTORY_KEY = 'isbtProcessedTxn_v1';
+const HISTORY_MAX = 10000;
+let processedSet = new Set();
+
+const $ = id => document.getElementById(id);
+const pasteTextEl = $('pasteText');
+const lastBalanceEl = $('lastBalance');
+const statusEl = $('status');
+const reportEl = $('reportPanel');
+const resultPanel = $('resultPanel');
+const countEl = $('count');
+const newCreditEl = $('newCredit');
+const newBalanceEl = $('newBalance');
+const previewEl = $('preview');
+const paginationEl = $('pagination');
+const btnProcess = $('btnProcess');
+const btnClear = $('btnClear');
+const btnSelectAll = $('btnSelectAll');
+const btnUnselectAll = $('btnUnselectAll');
+const btnDownload = $('btnDownload');
+const btnClearHistory = $('btnClearHistory');
 
 btnClear.addEventListener('click', clearPasteArea);
 btnProcess.addEventListener('click', processPastedText);
 btnSelectAll.addEventListener('click', () => toggleAll(true));
 btnUnselectAll.addEventListener('click', () => toggleAll(false));
 btnDownload.addEventListener('click', downloadCSV);
+btnClearHistory.addEventListener('click', clearHistory);
+lastBalanceEl.addEventListener('input', updateSummary); // ยอดคงเหลือใหม่ต้องอัปเดตเมื่อแก้ยอดล่าสุด
 
+loadHistory();
+
+// ─────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// เงินทั้งหมดเก็บเป็น "สตางค์" (จำนวนเต็ม) กันเศษทศนิยมสะสม
+function parseCents(str) {
+    const n = parseFloat(String(str ?? '').replace(/,/g, ''));
+    if (!Number.isFinite(n) || n <= 0) return null; // ต้องเป็นยอดเงินเข้า (> 0)
+    return Math.round(n * 100);
+}
+function balanceToCents(v) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+function fmtMoney(cents) {
+    return (cents / 100).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function money2(cents) {           // สำหรับใส่ใน CSV: 1234.50
+    return (cents / 100).toFixed(2);
+}
+
+// วันที่ตามเวลาไทย (ไม่ใช้ UTC — ช่วง 00:00–06:59 จะไม่ได้วันเมื่อวานอีก)
+function todayBangkok(d = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+function csvEscape(str) {
+    const value = String(str ?? '');
+    if (/[",\r\n]/.test(value)) {
+        return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ประวัติรายการที่เคยดาวน์โหลด (กันวางข้อมูลซ้อนกันคนละวัน)
+// ─────────────────────────────────────────────────────────────
+function loadHistory() {
+    try {
+        const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        processedSet = new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) {
+        processedSet = new Set();
+    }
+    updateHistoryCount();
+}
+function saveHistory() {
+    let arr = [...processedSet];
+    if (arr.length > HISTORY_MAX) arr = arr.slice(arr.length - HISTORY_MAX); // ทิ้งของเก่าสุด
+    processedSet = new Set(arr);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr)); } catch (e) { /* ignore */ }
+    updateHistoryCount();
+}
+function updateHistoryCount() {
+    $('historyCount').textContent = processedSet.size.toLocaleString('th-TH');
+}
+function clearHistory() {
+    if (!processedSet.size) return showToast('ไม่มีประวัติให้ล้าง');
+    if (!confirm(`ล้างประวัติ ${processedSet.size} รายการ? หลังจากนี้ระบบจะไม่เตือนรายการที่เคยดาวน์โหลดแล้ว`)) return;
+    processedSet = new Set();
+    saveHistory();
+    showToast('ล้างประวัติแล้ว');
+}
+const historyKeyOf = row => `${accountNumber}|${row.key}`;
+
+// ─────────────────────────────────────────────────────────────
 // Clear
+// ─────────────────────────────────────────────────────────────
 function clearPasteArea() {
     pasteTextEl.value = '';
     lastBalanceEl.value = '';
@@ -126,68 +264,104 @@ function clearPasteArea() {
     showToast('เคลียร์เรียบร้อย');
 }
 
+// ─────────────────────────────────────────────────────────────
 // Process
+// ─────────────────────────────────────────────────────────────
 function processPastedText() {
     const text = pasteTextEl.value.trim();
     if (!text) return statusEl.innerHTML = `<div class="text-red-400 text-xl">กรุณาวางข้อความก่อน</div>`;
 
-    // รีเซ็ต flags ตั้นต้นของการประมวลผล
     accountNumber = 'UNKNOWN';
     isTTB = false;
     isKTB = false;
 
     btnProcess.disabled = true;
     btnProcess.textContent = 'กำลังประมวลผล...';
-
+    reportEl.innerHTML = '';
     statusEl.innerHTML = `<div class="inline-flex items-center gap-3 bg-zinc-800 px-8 py-4 rounded-3xl"><div class="w-6 h-6 border-4 border-violet-400 border-t-transparent rounded-full animate-spin"></div> กำลังประมวลผล...</div>`;
 
     try {
-        // เตรียมบรรทัด: ถ้าเจอ 'Successful' ให้ใช้งานเฉพาะบรรทัดนั้น มิฉะนั้นใช้ทุกบรรทัดที่ไม่ว่าง
-        let lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
-        const filtered = lines.filter(l => /Successful/i.test(l));
-        if (filtered.length > 0) lines = filtered;
+        // เก็บเลขบรรทัดเดิมไว้ เพื่ออ้างอิงในรายงานแถวที่ข้าม
+        const rawEntries = text.split(/\r?\n/)
+            .map((l, i) => ({ text: l.trim(), no: i + 1 }))
+            .filter(e => e.text);
 
-        const seen = new Set();
-        allRows = [];
-        let duplicateCount = 0;
-        let totalNewCreditTemp = 0;
+        // ถ้ามีบรรทัดที่เป็น 'Successful' ใช้เฉพาะบรรทัดนั้น
+        let entries = rawEntries;
+        let notSuccessCount = 0;
+        const successEntries = rawEntries.filter(e => /Successful/i.test(e.text));
+        if (successEntries.length > 0) {
+            notSuccessCount = rawEntries.length - successEntries.length;
+            entries = successEntries;
+        }
+
+        const warnings = [];
 
         // ตรวจจับประเภทบัญชี
-        let accMatch = text.match(/(ISBT|TTB|KTB)-\d+/i);
+        const accMatch = text.match(/(ISBT|TTB|KTB)-\d+/i);
         if (accMatch) {
             accountNumber = accMatch[0];
             isTTB = accountNumber.startsWith('TTB');
             isKTB = accountNumber.startsWith('KTB');
-            console.log('พบบัญชี:', accountNumber, 'เป็น TTB:', isTTB, 'เป็น KTB:', isKTB);
+        }
+        const prefixes = new Set((text.match(/\b(ISBT|TTB|KTB)-\d/gi) || []).map(s => s.split('-')[0].toUpperCase()));
+        if (prefixes.size > 1) {
+            warnings.push(`พบเลขบัญชีหลายประเภทในข้อความเดียวกัน (${[...prefixes].join(', ')}) — ระบบใช้รูปแบบ "${accountNumber.split('-')[0]}" กับทุกบรรทัด บรรทัดที่ไม่ตรงจะถูกข้ามและแสดงในรายงานด้านล่าง`);
         }
 
-        // ตรวจหาว่า KTB หรือ ISBT/TTB จากรูปแบบข้อมูล
-        // สำคัญ: ตรวจสอบ ISBT/TTB prefix ก่อน ไม่ให้ KTB logic มาแทน
-        if (!isKTB && !isTTB && !accountNumber.startsWith('ISBT') && lines.length > 0) {
-            if (/mBanking|cBanking/.test(lines[0]) && /KTB|KBANK|BBL|SCB|BAY|TMB|UOB|CIMB|GSB/.test(lines[0])) {
-                // ตรวจสอบว่าไม่มี ISBT/TTB pattern
-                if (!/ISBT|TTB/.test(lines[0])) {
-                    isKTB = true;
-                    accountNumber = 'KTB-00000';
-                    console.log('ตรวจพบรูปแบบ KTB/KBANK');
-                }
+        // กรณีไม่เจอ prefix — ลองเดาว่าเป็น KTB/KBANK จากรูปแบบข้อมูล
+        if (!isKTB && !isTTB && !accountNumber.startsWith('ISBT') && entries.length > 0) {
+            const first = entries[0].text;
+            if (/mBanking|cBanking/.test(first) && /KTB|KBANK|BBL|SCB|BAY|TMB|UOB|CIMB|GSB/.test(first) && !/ISBT|TTB/.test(first)) {
+                isKTB = true;
+                accountNumber = 'KTB-00000';
             }
         }
 
-        if (isKTB) {
-            // Parse KTB format
-            parseKTBFormat(lines, allRows, seen, duplicateCount, totalNewCreditTemp);
-        } else {
-            // Parse ISBT/TTB format
-            parseISBTTTBFormat(lines, allRows, seen, duplicateCount, totalNewCreditTemp);
-        }
+        // ── วนอ่านทีละบรรทัด ──
+        allRows = [];
+        const skipped = [];
+        const seen = new Set();
+        let duplicateCount = 0;
+        let seenBeforeCount = 0;
+
+        entries.forEach(entry => {
+            const parts = entry.text.split(/\s+/).filter(Boolean);
+            const result = isKTB ? parseKTBLine(parts) : parseISBTTTBLine(parts);
+
+            if (result.skip) {
+                skipped.push({ no: entry.no, text: entry.text, reason: result.skip });
+                return;
+            }
+
+            const row = result.row;
+            // key รวม Transaction ID + บัญชี + ยอด + เวลา:
+            //  - รายการซ้ำจริง (วางซ้ำ) → key เหมือนกันทุกส่วน → ถูกกรอง
+            //  - คนละรายการที่ยอด/เวลาตรงกัน → txnId ต่างกัน → ไม่ถูกกรองผิด
+            row.key = `${row.txnId}|${row.accountNo}|${row.cents}|${row.transferDate}`;
+
+            if (seen.has(row.key)) {
+                duplicateCount++;
+                return;
+            }
+            seen.add(row.key);
+
+            row.no = allRows.length + 1;
+            row.seenBefore = processedSet.has(historyKeyOf(row));
+            row.selected = !row.seenBefore; // เคยดาวน์โหลดแล้ว → ไม่เลือกให้โดยอัตโนมัติ
+            if (row.seenBefore) seenBeforeCount++;
+            allRows.push(row);
+        });
+
+        renderReport({ warnings, skipped, notSuccessCount });
 
         if (allRows.length === 0) {
-            statusEl.innerHTML = `<div class="text-red-400 text-xl">❌ ไม่สามารถแยกข้อมูลได้</div>`;
+            statusEl.innerHTML = `<div class="text-red-400 text-xl">❌ ไม่สามารถแยกข้อมูลได้${skipped.length ? ` (ข้าม ${skipped.length} บรรทัด — ดูรายงานด้านล่าง)` : ''}</div>`;
+            resultPanel.classList.add('hidden');
             return;
         }
 
-        finishProcess(duplicateCount, totalNewCreditTemp);
+        finishProcess({ total: entries.length, duplicateCount, skippedCount: skipped.length, seenBeforeCount });
     } catch (e) {
         console.error(e);
         statusEl.innerHTML = `<div class="text-red-400 text-xl">เกิดข้อผิดพลาด</div>`;
@@ -197,189 +371,160 @@ function processPastedText() {
     }
 }
 
-function parseKTBFormat(lines, allRows, seen, duplicateCount, totalNewCreditTemp) {
-    lines.forEach(line => {
-        const parts = line.split(/\s+/).filter(p => p);
-        if (parts.length < 14) return;
+// ── ISBT / TTB ──  คืน { row } หรือ { skip: 'เหตุผล' }
+function parseISBTTTBLine(parts) {
+    if (parts.length < 12) return { skip: `ข้อมูลไม่ครบ (มี ${parts.length} คอลัมน์ ต้องมีอย่างน้อย 12)` };
 
-        let idx = 0;
-        
-        // Member ID
-        idx++; // skip
-        // Member Type  
-        idx++; // skip
-        // Transaction ID
-        idx++; // skip
-        // Account/Branch
-        idx++; // skip
-        
-        // Currency
-        if ((parts[idx++] || '').toUpperCase() !== 'THB') return;
-        
-        // Amount
-        const amountStr = (parts[idx++] || '').replace(/,/g, '');
-        const amount = parseFloat(amountStr) || 0;
-        if (amount === 0) return;
-        
-        // Channel
-        const channel = parts[idx++] || '';
-        
-        // Bank
-        const bank = (parts[idx++] || '').toUpperCase();
-        
-        // Account Name (can be multiple words until we find phone or date)
-        let nameParts = [];
-        while (idx < parts.length && !/^\d{8,}$/.test(parts[idx]) && !/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
-            nameParts.push(parts[idx++]);
-        }
-        
-        const accountName = nameParts.join(' ').trim();
-        
-        // Phone Number (optional) - รับหมายเลข 8 หลักขึ้นไป
-        let phoneNumber = '';
-        if (idx < parts.length && /^\d{8,}$/.test(parts[idx])) {
-            phoneNumber = parts[idx++];
-        }
-        
-        // Date parsing: look for DD-MMM-YYYY
-        let transferDate = '';
-        while (idx < parts.length) {
-            if (/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
-                // Found date, now collect date and time
-                const datePart = parts[idx++];
-                const timePart = parts[idx] ? parts[idx++] : '';
-                const ampmPart = parts[idx] ? parts[idx++] : '';
-                
-                // Skip end date and time
-                if (idx < parts.length && /^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
-                    idx++; // end date
-                }
-                if (idx < parts.length && /^\d{1,2}:\d{2}:\d{2}$/.test(parts[idx])) {
-                    idx++; // end time
-                }
-                if (idx < parts.length && /^(AM|PM)$/i.test(parts[idx])) {
-                    idx++; // end AM/PM
-                }
-                
-                // Status check
-                if (idx < parts.length && (parts[idx++] || '').toUpperCase() !== 'SUCCESSFUL') return;
-                
-                transferDate = formatDate(datePart + ' ' + timePart + ' ' + ampmPart);
-                break;
-            }
-            idx++;
-        }
-        
-        if (!transferDate) return;
-        
-        // Combine bank code with phone number for account number
-        const accountNo = phoneNumber ? `${bank}${phoneNumber}` : `${bank}Unknown`;
-        
-        const key = `${accountNo}|${amount}|${transferDate}`;
-        
-        if (seen.has(key)) {
-            duplicateCount++;
-            return;
-        }
-        seen.add(key);
+    const txnId = parts[2];
+    let idx = 3; // ข้าม Member, Risk, TxnId
 
-        totalNewCreditTemp += amount;
-        allRows.push({
-            no: allRows.length + 1,
-            amount,
-            accountName,
-            accountNo: accountNo,
-            bank,
-            transferDate: transferDate,
-            selected: true
-        });
-    });
+    const acc = parts[idx];
+    if (!acc || !/(ISBT|TTB)-[\d-]{5,20}/i.test(acc)) return { skip: 'ไม่พบเลขบัญชี ISBT/TTB ในตำแหน่งที่คาดไว้ (อาจเป็นข้อมูลคนละรูปแบบ)' };
+    idx++;
+
+    if ((parts[idx++] || '').toUpperCase() !== 'THB') return { skip: 'สกุลเงินไม่ใช่ THB' };
+
+    const cents = parseCents(parts[idx++]);
+    if (cents === null) return { skip: 'จำนวนเงินอ่านไม่ได้ หรือไม่ใช่ยอดเงินเข้า (ต้องมากกว่า 0)' };
+
+    const channel = parts[idx++] || '';
+    const validChannels = ['mBanking', 'cBanking', 'ATM', 'Ebanking', 'Branch', 'Online', 'Mobile', 'Internet'];
+    if (!validChannels.includes(channel)) return { skip: `ช่องทาง "${channel}" ไม่อยู่ในรายการที่รองรับ` };
+
+    const bank = (parts[idx++] || '').toUpperCase();
+    const nameParts = [];
+    while (idx < parts.length && !/^[-\d]{8,20}$/.test(parts[idx])) {
+        nameParts.push(parts[idx++]);
+    }
+    const accountName = nameParts.join(' ').trim();
+
+    const accountNo = (parts[idx++] || '').replace(/[\s-]+/g, '');
+    if (!accountNo) return { skip: 'ไม่พบเลขบัญชีผู้โอน' };
+
+    const dateTokens = parts.slice(idx, idx + 4);
+    const transferDate = formatDate(dateTokens.join(' ').trim());
+    if (!isFormattedDate(transferDate)) return { skip: 'อ่านวันที่/เวลาโอนไม่ได้' };
+
+    return { row: { cents, accountName, accountNo, bank, transferDate, txnId } };
 }
 
-function parseISBTTTBFormat(lines, allRows, seen, duplicateCount, totalNewCreditTemp) {
-    lines.forEach(line => {
-        const parts = line.split(/\s+/).filter(p => p);
-        if (parts.length < 12) return;
+// ── KTB ──
+function parseKTBLine(parts) {
+    if (parts.length < 14) return { skip: `ข้อมูลไม่ครบ (มี ${parts.length} คอลัมน์ ต้องมีอย่างน้อย 14)` };
 
-        let idx = 0;
-        idx += 3; // ข้าม Member, Risk, TxnId
+    const txnId = parts[2];
+    let idx = 4; // ข้าม Member ID, Member Type, Transaction ID, Account/Branch
 
-        const acc = parts[idx];
-        if (!acc || !/(ISBT|TTB)-[\d-]{5,20}/i.test(acc)) return;
+    if ((parts[idx++] || '').toUpperCase() !== 'THB') return { skip: 'สกุลเงินไม่ใช่ THB' };
+
+    const cents = parseCents(parts[idx++]);
+    if (cents === null) return { skip: 'จำนวนเงินอ่านไม่ได้ หรือไม่ใช่ยอดเงินเข้า (ต้องมากกว่า 0)' };
+
+    idx++; // Channel
+    const bank = (parts[idx++] || '').toUpperCase();
+
+    const nameParts = [];
+    while (idx < parts.length && !/^\d{8,}$/.test(parts[idx]) && !/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
+        nameParts.push(parts[idx++]);
+    }
+    const accountName = nameParts.join(' ').trim();
+
+    let phoneNumber = '';
+    if (idx < parts.length && /^\d{8,}$/.test(parts[idx])) {
+        phoneNumber = parts[idx++];
+    }
+
+    let transferDate = '';
+    while (idx < parts.length) {
+        if (/^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) {
+            const datePart = parts[idx++];
+            const timePart = parts[idx] ? parts[idx++] : '';
+            const ampmPart = parts[idx] ? parts[idx++] : '';
+
+            // ข้ามวันที่/เวลาสิ้นสุด
+            if (idx < parts.length && /^\d{2}-[A-Za-z]{3}-\d{4}$/.test(parts[idx])) idx++;
+            if (idx < parts.length && /^\d{1,2}:\d{2}:\d{2}$/.test(parts[idx])) idx++;
+            if (idx < parts.length && /^(AM|PM)$/i.test(parts[idx])) idx++;
+
+            if ((parts[idx++] || '').toUpperCase() !== 'SUCCESSFUL') return { skip: 'สถานะไม่ใช่ Successful' };
+
+            transferDate = formatDate(datePart + ' ' + timePart + ' ' + ampmPart);
+            break;
+        }
         idx++;
+    }
+    if (!isFormattedDate(transferDate)) return { skip: 'อ่านวันที่/เวลาโอนไม่ได้' };
 
-        if ((parts[idx++] || '').toUpperCase() !== 'THB') return;
-
-        const amountStr = (parts[idx++] || '').replace(/,/g, '');
-        const amount = parseFloat(amountStr) || 0;
-
-        const channel = parts[idx++] || '';
-        const validChannels = ['mBanking', 'cBanking', 'ATM', 'Ebanking', 'Branch', 'Online', 'Mobile', 'Internet'];
-        if (!validChannels.includes(channel)) {
-            console.warn('ช่องทางไม่รองรับ:', channel, 'ในบรรทัด', line);
-            return;
-        }
-        const bank = (parts[idx++] || '').toUpperCase();
-        let nameParts = [];
-        while (idx < parts.length && !/^[-\d]{8,20}$/.test(parts[idx])) {
-            nameParts.push(parts[idx++]);
-        }
-        const accountName = nameParts.join(' ').trim();
-
-        const accountNo = (parts[idx++] || '').replace(/[\s-]+/g, '');
-
-        const dateTokens = parts.slice(idx, idx + 4);
-        const transferDateRaw = dateTokens.join(' ').trim();
-        idx += dateTokens.length;
-
-        const key = `${accountNo}|${amount}|${transferDateRaw}`;
-        if (seen.has(key)) {
-            duplicateCount++;
-            return;
-        }
-        seen.add(key);
-
-        totalNewCreditTemp += amount;
-        allRows.push({
-            no: allRows.length + 1,
-            amount,
-            accountName,
-            accountNo,
-            bank,
-            transferDate: formatDate(transferDateRaw),
-            selected: true
-        });
-    });
+    const accountNo = phoneNumber ? `${bank}${phoneNumber}` : `${bank}Unknown`;
+    return { row: { cents, accountName, accountNo, bank, transferDate, txnId } };
 }
 
-function finishProcess(duplicateCount, totalCredit) {
-    currentDateStr = new Date().toISOString().slice(0,10);
+function isFormattedDate(s) {
+    return /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(s || '');
+}
+
+// ── รายงานผลการอ่านข้อมูล (แถวที่ข้ามต้องไม่หายเงียบ ๆ) ──
+function renderReport({ warnings, skipped, notSuccessCount }) {
+    let html = '';
+
+    warnings.forEach(w => {
+        html += `<div class="mb-4 bg-amber-900/40 border border-amber-500/60 text-amber-200 px-6 py-4 rounded-2xl text-sm">⚠️ ${esc(w)}</div>`;
+    });
+
+    if (notSuccessCount > 0) {
+        html += `<div class="mb-4 bg-zinc-800/80 border border-zinc-600 text-zinc-300 px-6 py-3 rounded-2xl text-sm">ℹ️ ไม่นำ ${notSuccessCount} บรรทัดที่ไม่มีคำว่า Successful มาประมวลผล (เช่น หัวตาราง หรือรายการที่ไม่สำเร็จ)</div>`;
+    }
+
+    if (skipped.length > 0) {
+        const LIMIT = 100;
+        const items = skipped.slice(0, LIMIT).map(s =>
+            `<li class="py-2 border-b border-zinc-700 last:border-0"><span class="text-rose-300 font-medium">บรรทัดที่ ${s.no}:</span> ${esc(s.reason)}<div class="font-mono text-xs text-zinc-500 mt-1 break-all">${esc(s.text.length > 200 ? s.text.slice(0, 200) + '…' : s.text)}</div></li>`
+        ).join('');
+        html += `<details open class="bg-rose-950/40 border border-rose-500/60 rounded-2xl px-6 py-4">
+            <summary class="cursor-pointer text-rose-200 font-semibold">❗ ข้าม ${skipped.length} บรรทัดที่อ่านไม่ได้ — โปรดตรวจสอบก่อนนำไปใช้</summary>
+            <ul class="mt-3 text-sm text-zinc-200">${items}</ul>
+            ${skipped.length > LIMIT ? `<div class="text-xs text-zinc-400 mt-2">แสดง ${LIMIT} จาก ${skipped.length} บรรทัดแรก</div>` : ''}
+        </details>`;
+    }
+
+    reportEl.innerHTML = html;
+}
+
+function finishProcess({ total, duplicateCount, skippedCount, seenBeforeCount }) {
     updateSummary();
     renderTable(1);
     renderPagination();
 
     resultPanel.classList.remove('hidden');
 
-    let msg = `✅ เสร็จสิ้น — พบ ${allRows.length} รายการ`;
-    if (duplicateCount > 0) msg += ` (กรองซ้ำ ${duplicateCount} รายการ)`;
-    statusEl.innerHTML = `<div class="bg-emerald-900/60 border border-emerald-500 text-emerald-300 px-10 py-5 rounded-3xl inline-flex items-center gap-3 text-lg">${msg}</div>`;
+    let msg = `✅ เสร็จสิ้น — นำเข้า ${allRows.length} รายการ จาก ${total} บรรทัด`;
+    const extras = [];
+    if (duplicateCount > 0) extras.push(`ซ้ำ ${duplicateCount}`);
+    if (skippedCount > 0) extras.push(`ข้าม ${skippedCount}`);
+    if (extras.length) msg += ` (${extras.join(', ')})`;
+
+    let html = `<div class="bg-emerald-900/60 border border-emerald-500 text-emerald-300 px-10 py-5 rounded-3xl inline-flex items-center gap-3 text-lg">${esc(msg)}</div>`;
+    if (seenBeforeCount > 0) {
+        html += `<div class="mt-4 text-amber-300 text-sm">พบ ${seenBeforeCount} รายการที่เคยดาวน์โหลดแล้ว — ระบบยังไม่ได้เลือกให้ (ติ๊กเองได้ถ้าต้องการรวม)</div>`;
+    }
+    statusEl.innerHTML = html;
 
     showToast(`ประมวลผลสำเร็จ ${allRows.length} รายการ`);
 }
 
-// Update summary
+// ─────────────────────────────────────────────────────────────
+// Summary / Table
+// ─────────────────────────────────────────────────────────────
 function updateSummary() {
     const selected = allRows.filter(r => r.selected);
-    const count = selected.length;
-    const total = selected.reduce((sum, r) => sum + r.amount, 0);
+    const totalCents = selected.reduce((sum, r) => sum + r.cents, 0);
 
-    countEl.textContent = count;
-    newCreditEl.textContent = total.toLocaleString('th-TH', {minimumFractionDigits:2});
-    newBalanceEl.textContent = ((parseFloat(lastBalanceEl.value) || 0) + total).toLocaleString('th-TH', {minimumFractionDigits:2});
-    btnDownload.disabled = count === 0;
+    countEl.textContent = selected.length;
+    newCreditEl.textContent = fmtMoney(totalCents);
+    newBalanceEl.textContent = fmtMoney(balanceToCents(lastBalanceEl.value) + totalCents);
+    btnDownload.disabled = selected.length === 0;
 }
 
-// Render table
 function renderTable(page = 1) {
     currentPage = page;
     const totalPages = Math.max(1, Math.ceil(allRows.length / rowsPerPage));
@@ -399,10 +544,10 @@ function renderTable(page = 1) {
     pageRows.forEach(r => {
         html += `<tr class="hover:bg-zinc-800/50 cursor-pointer ${r.selected ? 'selected' : ''}" onclick="toggleRow(${r.no}, event)">
             <td class="p-4 text-center"><input type="checkbox" data-id="${r.no}" ${r.selected ? 'checked' : ''} onchange="toggleCheckbox(${r.no}, this.checked, event); event.stopPropagation();"></td>
-            <td class="p-4 font-mono">${r.transferDate}</td>
-            <td class="p-4 text-emerald-400 font-medium">${r.amount.toLocaleString('th-TH')}</td>
-            <td class="p-4">${r.accountName}</td>
-            <td class="p-4 font-mono">${r.accountNo}</td>
+            <td class="p-4 font-mono">${esc(r.transferDate)}${r.seenBefore ? '<span class="tag-seen">เคยดาวน์โหลดแล้ว</span>' : ''}</td>
+            <td class="p-4 text-emerald-400 font-medium">${esc(fmtMoney(r.cents))}</td>
+            <td class="p-4">${esc(r.accountName)}</td>
+            <td class="p-4 font-mono">${esc(r.accountNo)}</td>
         </tr>`;
     });
 
@@ -410,7 +555,6 @@ function renderTable(page = 1) {
     previewEl.innerHTML = html;
 }
 
-// Toggle functions
 function toggleRow(id, event) {
     if (event.target.type === 'checkbox') return;
     const row = allRows.find(r => r.no === id);
@@ -436,7 +580,6 @@ function toggleAll(checked) {
     renderPagination();
 }
 
-// Pagination
 function renderPagination() {
     const totalPages = Math.max(1, Math.ceil(allRows.length / rowsPerPage));
     if (totalPages <= 1) {
@@ -467,91 +610,93 @@ function changePage(page) {
     renderPagination();
 }
 
-// Download - แยก format ตามประเภทบัญชี
-function downloadCSV() {
-    const rowsToExport = allRows.filter(r => r.selected);
-    if (!rowsToExport.length) return showToast('ไม่มีรายการที่เลือก');
-
-    const finalBalance = (parseFloat(lastBalanceEl.value) || 0) + rowsToExport.reduce((sum, r) => sum + r.amount, 0);
-
+// ─────────────────────────────────────────────────────────────
+// Download — แยก format ตามประเภทบัญชี
+// ─────────────────────────────────────────────────────────────
+function buildCSV(rowsToExport, lastBalanceCents) {
+    const totalCents = rowsToExport.reduce((sum, r) => sum + r.cents, 0);
+    const finalBalance = money2(lastBalanceCents + totalCents);
     let csvContent = '';
 
     if (isKTB) {
-        // Format สำหรับ KTB
-        csvContent = `"${finalBalance.toFixed(2)}"\r\n`;
+        csvContent = `"${finalBalance}"\r\n`;
         csvContent += `No,Date,Transaction,Description,Cheque No,Amount,Tax,Balance,Branch Code\r\n`;
 
         let no = 1;
-        let runningBalance = parseFloat(lastBalanceEl.value) || 0;
-        
         rowsToExport.forEach(r => {
-            runningBalance += r.amount;
             const ktbDate = formatDateForKTB(r.transferDate);
             const description = `From account no.: ${r.accountNo} From account name: ${r.accountName}`.trim();
-            csvContent += `${no++},${ktbDate},,${csvEscape(description)},,${r.amount.toFixed(2)},,,\r\n`;
+            csvContent += `${no++},${ktbDate},,${csvEscape(description)},,${money2(r.cents)},,,\r\n`;
         });
     } else if (isTTB) {
-        // Format สำหรับ TTB
-        csvContent = `"${finalBalance.toFixed(2)}"\r\n`;
+        csvContent = `"${finalBalance}"\r\n`;
         csvContent += `No, Date, Details, Bank, Amount, Fee, Balance, Note, Reference\r\n`;
 
         let no = 1;
         rowsToExport.forEach(r => {
             const ttbDate = formatDateTTB(r.transferDate);
             const details = `Transfer in ${r.bank || ''} ${r.accountNo} ${r.accountName}`.trim();
-            csvContent += `${no++},${ttbDate},${csvEscape(details)},," ${r.amount.toFixed(2)}",,,,\r\n`;
+            csvContent += `${no++},${ttbDate},${csvEscape(details)},," ${money2(r.cents)}",,,,\r\n`;
         });
     } else {
-        // Format สำหรับ ISBT (เดิม)
-        csvContent = `${finalBalance.toFixed(2)},,,,,,\r\n`;
+        // ISBT
+        csvContent = `${finalBalance},,,,,,\r\n`;
         csvContent += `No,Transaction Date,Description,Debit,Credit,Account Name,Account Number\r\n`;
 
         let no = 1;
         rowsToExport.forEach(r => {
-            csvContent += `${no++},${r.transferDate},รับโอนเข้าบัญชีออมทรัพย์,,${r.amount},${r.accountName},${r.accountNo}\r\n`;
+            csvContent += `${no++},${r.transferDate},รับโอนเข้าบัญชีออมทรัพย์,,${r.cents / 100},${csvEscape(r.accountName)},${csvEscape(r.accountNo)}\r\n`;
         });
     }
+    return csvContent;
+}
+
+function downloadCSV() {
+    const rowsToExport = allRows.filter(r => r.selected);
+    if (!rowsToExport.length) return showToast('ไม่มีรายการที่เลือก');
+
+    const csvContent = buildCSV(rowsToExport, balanceToCents(lastBalanceEl.value));
 
     const BOM = '\uFEFF';
     const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${accountNumber}-${currentDateStr}.csv`;
+    a.download = `${accountNumber}-${todayBangkok()}.csv`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); // อย่าเพิกถอนทันที บางเบราว์เซอร์ดาวน์โหลดไม่ทัน
+
+    // จำรายการที่ดาวน์โหลดแล้ว เพื่อเตือนถ้าวางซ้ำภายหลัง
+    rowsToExport.forEach(r => {
+        processedSet.add(historyKeyOf(r));
+        r.seenBefore = true;
+    });
+    saveHistory();
+    renderTable(currentPage);
+    showToast(`ดาวน์โหลด ${rowsToExport.length} รายการแล้ว`);
 }
 
-function csvEscape(str) {
-    const value = String(str || '');
-    if (/[",\n]/.test(value)) {
-        return `"${value.replace(/"/g, '""')}"`;
-    }
-    return value;
-}
-
-// Toast + Date format (เหมือนเดิม)
-function showToast(msg) {
-    const t = document.createElement('div');
-    t.className = 'toast';
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3000);
-}
-
+// ─────────────────────────────────────────────────────────────
+// Date formats
+// ─────────────────────────────────────────────────────────────
 function formatDate(str) {
     if (!str) return '';
 
-    // 1) ISBT style '04-Jun-2025 11:31:05 AM'
-    const matchAmPm = str.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{1,2}:\d{2}:\d{2})\s+(AM|PM)/);
+    // 1) '04-Jun-2025 11:31:05 AM'
+    const matchAmPm = str.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{1,2}:\d{2}:\d{2})\s+(AM|PM)/i);
     if (matchAmPm) {
         let [_, dd, mon, yyyy, time, ampm] = matchAmPm;
         let [hh, mm, ss] = time.split(':').map(Number);
+        ampm = ampm.toUpperCase();
         if (ampm === 'PM' && hh < 12) hh += 12;
         if (ampm === 'AM' && hh === 12) hh = 0;
         const monthMap = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
-        const mmNum = monthMap[mon] || '01';
-        return `${String(dd).padStart(2,'0')}/${mmNum}/${yyyy} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+        const monKey = mon.charAt(0).toUpperCase() + mon.slice(1).toLowerCase(); // ไม่สนตัวพิมพ์เล็ก/ใหญ่
+        const mmNum = monthMap[monKey];
+        if (!mmNum) return ''; // เดือนที่ไม่รู้จัก → ให้ผู้เรียกข้ามพร้อมรายงาน แทนการเดาเป็นมกราคม
+        return `${String(dd).padStart(2, '0')}/${mmNum}/${yyyy} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
     }
 
     // 2) DD/MM/YYYY hh:mm:ss
@@ -559,10 +704,10 @@ function formatDate(str) {
     if (matchDMY) {
         let [_, dd, mm, yyyy, time] = matchDMY;
         const [hh, min, ss] = time.split(':').map(Number);
-        return `${String(dd).padStart(2,'0')}/${String(mm).padStart(2,'0')}/${yyyy} ${String(hh).padStart(2,'0')}:${String(min).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+        return `${String(dd).padStart(2, '0')}/${String(mm).padStart(2, '0')}/${yyyy} ${String(hh).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
     }
 
-    // 3) ISO style or fallback via Date parser
+    // 3) ISO style หรือรูปแบบที่ Date อ่านได้
     const d = new Date(str);
     if (!isNaN(d)) {
         const dd = String(d.getDate()).padStart(2, '0');
@@ -574,7 +719,7 @@ function formatDate(str) {
         return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
     }
 
-    return str;
+    return '';
 }
 
 function formatDateTTB(str) {
@@ -606,19 +751,18 @@ function formatDateTTB(str) {
 }
 
 function formatDateForKTB(str) {
-    // Converts formatted date to DD-MMM-YYYY HH:MM format for KTB output
+    // DD/MM/YYYY HH:MM:SS → DD-MMM-YYYY HH:MM
     if (!str) return '';
 
-    // If already in DD/MM/YYYY HH:MM:SS format
     const m1 = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
     if (m1) {
         const [_, dd, mm, yyyy, hh, min] = m1;
         const monthMap = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthNum = parseInt(mm);
+        const monthNum = parseInt(mm, 10);
         return `${dd}-${monthMap[monthNum - 1]}-${yyyy} ${hh}:${min}`;
     }
 
-    return str.split(' ')[0] || str; // fallback to just date part
+    return str.split(' ')[0] || str;
 }
 </script>
 </body>
